@@ -1,0 +1,118 @@
+/* Colores Twitch + Gaming */
+:root {
+  --twitch-purple: #9146FF;
+  --twitch-dark:   #18181B;
+  --twitch-mid:    #2C2F33;
+  --twitch-light:  #F9F9F9;
+  --neon-green:    #39FF14;
+  --neon-pink:     #FF6EC7;
+  --text-light:    #FFFFFF;
+  --text-dark:     #000000;
+  --card-bg:       var(--twitch-mid);
+  --card-border:   var(--twitch-purple);
+}
+[data-theme="dark"] {
+  --bg: var(--twitch-dark);
+  --text: var(--text-light);
+}
+[data-theme="light"] {
+  --bg: var(--twitch-light);
+  --text: var(--text-dark);
+  --card-bg: var(--twitch-light);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', Tahoma, sans-serif;
+  display: flex; flex-direction: column; height: 100vh;
+}
+header {
+  background: var(--twitch-purple);
+  padding: 0.75rem 1rem;
+  display: flex; justify-content: space-between; align-items: center;
+}
+header h1 { font-size: 1.4rem; }
+header .controls { display: flex; align-items: center; gap: 1rem; }
+header .shortcut { font-size: 0.9rem; color: var(--neon-green); }
+header button {
+  background: none; border: none; font-size: 1.2rem; cursor: pointer;
+}
+main { flex: 1; overflow: hidden; }
+#message-list-container {
+  height: 100%;
+  overflow-y: auto;
+  padding: 1rem;
+}
+#message-list {
+  list-style: none;
+  display: flex; flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Item de lista */
+.message-item {
+  background: var(--card-bg);
+  border: 2px solid var(--card-border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  display: flex; align-items: center;
+  transition: background 0.2s, border-color 0.2s;
+}
+.message-item.selected {
+  border-color: var(--neon-pink);
+  background: rgba(255,110,199,0.1);
+}
+.message-item.reviewed {
+  opacity: 0.5;
+}
+.message-item img {
+  width: 32px; height: 32px; border-radius: 50%; margin-right: 0.5rem;
+}
+.message-item .info {
+  flex: 1;
+  display: flex; flex-direction: column;
+}
+.message-item .info .user {
+  font-weight: bold; color: var(--twitch-purple);
+}
+.message-item .info .channel {
+  font-size: 0.85rem; color: var(--neon-green);
+}
+.message-item .info .text {
+  margin: 0.25rem 0; font-size: 0.95rem; line-height: 1.2;
+}
+.message-item .info .prediction {
+  font-size: 0.85rem;
+}
+.message-item .info .prediction .label {
+  padding: 0.1rem 0.3rem; border-radius: 3px; margin-right: 0.3rem;
+  font-weight: bold; text-transform: uppercase;
+}
+.label.clean { background: var(--neon-green); color: var(--text-dark); }
+.label.toxic { background: #FF0000; color: var(--text-light); }
+.label.all_caps { background: #FFFF00; color: var(--twitch-dark); }
+.label.money_request { background: var(--neon-pink); color: var(--text-light); }
+
+.message-item .actions {
+  display: flex; gap: 0.25rem; margin-left: 0.5rem;
+}
+.actions button {
+  background: var(--twitch-purple);
+  border: none;
+  border-radius: 4px;
+  color: var(--text-light);
+  font-size: 1rem;
+  padding: 0.3rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.actions button.ban:hover   { background: #FF0000; }
+.actions button.allow:hover { background: var(--neon-green); }
+
+/* Responsive */
+@media (max-width: 500px) {
+  .message-item { flex-direction: column; align-items: flex-start; }
+  .actions { margin-top: 0.5rem; }
+}

@@ -1,0 +1,8 @@
+# Python dependencies for feedback extraction and PEFT/LoRA training
+python-dotenv
+pymongo
+datasets
+transformers
+torch
+accelerate
+peft

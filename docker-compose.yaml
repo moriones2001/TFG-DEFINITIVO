@@ -1,0 +1,71 @@
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: moderation-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - moderation-net
+
+  mongo:
+    image: mongo:6.0
+    container_name: moderation-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - moderation-net
+
+  collector:
+    build:
+      context: ./collector
+      dockerfile: Dockerfile
+    container_name: moderation-collector
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - moderation-net
+
+  api_inference:
+    build:
+      context: ./api_inference
+    container_name: moderation-api-inference
+    env_file: [.env]
+    ports: ["8000:8000"]
+    depends_on: [redis, mongo]
+    networks: [moderation-net]
+    volumes:
+      - ./api_inference/adapters:/app/adapters
+
+  model_trainer:
+    build:
+      context: ./model_trainer
+    container_name: moderation-model-trainer
+    env_file: [.env]
+    networks: [moderation-net]
+    volumes:
+      - ./api_inference/adapters:/app/adapters
+
+  web_interface:
+    build:
+      context: ./web_interface
+      dockerfile: Dockerfile
+    container_name: moderation-web
+    ports:
+      - "8080:80"          # map host 8080 → container 80
+    depends_on:
+      - api_inference
+    networks:
+      - moderation-net
+
+
+networks:
+  moderation-net:
+    driver: bridge
+
+volumes:
+  mongo_data:

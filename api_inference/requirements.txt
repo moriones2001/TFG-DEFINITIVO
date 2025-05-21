@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+redis
+motor
+python-dotenv
+transformers
+peft
+torch
