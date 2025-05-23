@@ -44,6 +44,7 @@ function addMessageItem(msg) {
   info.className = "info";
   const lora = msg.prediction_lora || {};
   const tfidf = msg.prediction_tfidf || {};
+  const clasico = msg.prediction_clasico || {};
 
   // Si no hay al menos una predicción, ignora el mensaje
   if (!lora.label && !tfidf.label) {
@@ -56,14 +57,9 @@ function addMessageItem(msg) {
     <div class="channel">${msg.channel || "?"}</div>
     <div class="text">${msg.text || ""}</div>
     <div class="prediction">
-      <span class="label ${lora.label || "unknown"}">
-        [LoRA] ${lora.label !== undefined ? lora.label : "?"}
-        ${(lora.prob !== undefined ? (lora.prob*100).toFixed(1)+'%' : '')}
-      </span>
-      <span class="label ${tfidf.label || "unknown"}">
-        [TFIDF] ${tfidf.label !== undefined ? tfidf.label : "?"}
-        ${(tfidf.prob !== undefined ? (tfidf.prob*100).toFixed(1)+'%' : '')}
-      </span>
+      <span class="label ${lora.label || "unknown"}">[LoRA] ${lora.label !== undefined ? lora.label : "?"} ${(lora.prob !== undefined ? (lora.prob*100).toFixed(1)+'%' : '')}</span>
+      <span class="label ${tfidf.label || "unknown"}">[TFIDF] ${tfidf.label !== undefined ? tfidf.label : "?"} ${(tfidf.prob !== undefined ? (tfidf.prob*100).toFixed(1)+'%' : '')}</span>
+      <span class="label ${clasico.label || "unknown"}">[CLASICO] ${clasico.label !== undefined ? clasico.label : "?"} ${(clasico.prob !== undefined ? (clasico.prob*100).toFixed(1)+'%' : '')}</span>
     </div>
   `;
   li.appendChild(info);

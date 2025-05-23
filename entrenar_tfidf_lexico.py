@@ -7,8 +7,18 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
 from scipy.sparse import hstack
+
+import emoji
+import nltk
 from nltk.corpus import stopwords
-spanish_stopwords = stopwords.words('spanish')
+from nltk.stem.snowball import SnowballStemmer
+
+# Descargas solo si hace falta
+nltk.download('punkt')
+nltk.download('stopwords')
+
+spanish_stopwords = set(stopwords.words('spanish'))
+stemmer = SnowballStemmer("spanish")
 
 # ---------------------------
 # 1. PARÁMETROS
@@ -22,20 +32,66 @@ MIN_TEXT_LEN = 5
 TEST_SIZE = 0.2
 
 # ---------------------------
+# FUNCIONES DE PREPROCESADO
+# ---------------------------
+def emojis_to_words(text):
+    # Traduce emojis a alias tipo :joy:
+    text = emoji.demojize(text, delimiters=(" ", " "))
+    # Opcional: traduce alias principales a español (puedes añadir más)
+    replacements = {
+        "joy": "risa",
+        "heart": "corazon",
+        "fire": "fuego",
+        "angry": "enfado",
+        "sad": "triste",
+        "clap": "aplauso",
+        "ok_hand": "ok",
+        "thumbs_up": "positivo",
+        "thumbs_down": "negativo",
+        "laughing": "risa",
+        "cry": "llora",
+        "smile": "sonrisa",
+        "scream": "susto",
+        "poop": "caca"
+    }
+    for en, es in replacements.items():
+        text = text.replace(f"{en}", es)
+    # Elimina los dos puntos de los alias emoji
+    text = text.replace(":", " ")
+    return text
+
+def clean_and_stem(text):
+    text = text.lower().strip()
+    text = emojis_to_words(text)
+    # Tokeniza y elimina stopwords, luego aplica stemming solo a las palabras (isalpha)
+    tokens = nltk.word_tokenize(text, language="spanish")
+    tokens = [stemmer.stem(w) for w in tokens if w not in spanish_stopwords and w.isalpha()]
+    return " ".join(tokens)
+
+# ---------------------------
 # 2. CARGA Y LIMPIEZA DEL DATASET
 # ---------------------------
 print("Leyendo dataset...")
 df = pd.read_csv(DATASET_PATH)
 assert "text" in df.columns and "label" in df.columns, "CSV debe tener columnas 'text' y 'label'"
 
-# Limpieza básica
 df = df.drop_duplicates(subset=["text"])
-df["text"] = df["text"].astype(str).str.lower().str.strip()
+df["text"] = df["text"].astype(str).str.strip()
 df = df[df["text"].str.len() > MIN_TEXT_LEN]
 df = df[df["label"].isin([0, 1])]
 df = df.dropna(subset=["text", "label"])
 print(f"Ejemplos tras limpieza: {len(df)}")
 
+# ---------------------------
+# 2b. NORMALIZACIÓN AVANZADA DE TEXTO
+# ---------------------------
+print("Normalizando texto (emojis → palabras, stopwords, stemming)...")
+df["text"] = df["text"].apply(clean_and_stem)
+
+# Muestra ejemplos de texto normalizado
+print("\n=== Ejemplos de texto normalizado ===")
+for i in range(5):
+    print(f"Original: {df.iloc[i]['text']}")
 # ---------------------------
 # 3. CARGA DE LÉXICOS
 # ---------------------------
@@ -56,7 +112,7 @@ print("Vectorizando texto...")
 vectorizer = TfidfVectorizer(
     max_features=7000,
     ngram_range=(1,3),
-    stop_words=spanish_stopwords
+    stop_words=None  # Ya quitamos stopwords en el preprocesado
 )
 
 X_tfidf = vectorizer.fit_transform(df["text"])

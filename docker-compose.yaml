@@ -41,6 +41,7 @@ services:
     volumes:
       - ./api_inference/adapters:/app/adapters
       - ./models/tfidf_lexico:/app/models/tfidf_lexico
+      - ./models/mejor_clasico:/app/models/mejor_clasico
 
   model_trainer:
     build:

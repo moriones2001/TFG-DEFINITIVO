@@ -1,7 +1,4 @@
 # inference_server.py
-# Purpose: Consume messages from Redis, classify with regex + PEFT model AND TF-IDF+Léxico,
-#          save in MongoDB, broadcast via WebSocket, and accept moderator feedback.
-
 import os
 import re
 import json
@@ -16,10 +13,7 @@ from redis.asyncio import Redis
 from motor.motor_asyncio import AsyncIOMotorClient
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from peft import PeftModel
-from fastapi.middleware.cors import CORSMiddleware
 from bson import ObjectId
-
-# --- Extra: Carga de modelo clásico TF-IDF+léxico ---
 import joblib
 import numpy as np
 from scipy.sparse import hstack
@@ -32,6 +26,7 @@ MONGO_DB  = os.getenv("MONGO_DB", "moderation")
 MODEL_NAME = os.getenv("MODEL_NAME", "pysentimiento/robertuito-hate-speech")
 ADAPTER_PATH = os.getenv("ADAPTER_PATH", "./adapters/latest")
 TFIDF_PATH = "models/tfidf_lexico"
+MEJOR_CLASICO_PATH = "models/mejor_clasico"
 
 # --- Initialize clients ---
 redis = Redis.from_url(REDIS_URL)
@@ -57,30 +52,60 @@ else:
 
 # --- Load TF-IDF+Léxico model ---
 try:
-    vectorizer = joblib.load(os.path.join(TFIDF_PATH, "vectorizer.joblib"))
+    vectorizer_tfidf = joblib.load(os.path.join(TFIDF_PATH, "vectorizer.joblib"))
     clf_tfidf = joblib.load(os.path.join(TFIDF_PATH, "model.joblib"))
-    lexicons = joblib.load(os.path.join(TFIDF_PATH, "lexicon.pkl"))
+    lexicons_tfidf = joblib.load(os.path.join(TFIDF_PATH, "lexicon.pkl"))
     print("TF-IDF+léxico model loaded correctly.")
 except Exception as e:
     print(f"⚠️ Failed to load TF-IDF+léxico model: {e}")
-    vectorizer = None
+    vectorizer_tfidf = None
     clf_tfidf = None
-    lexicons = None
+    lexicons_tfidf = None
+
+# --- Load mejor modelo clásico ---
+try:
+    vectorizer_clasico = joblib.load(os.path.join(MEJOR_CLASICO_PATH, "vectorizer.joblib"))
+    clf_mejor = joblib.load(os.path.join(MEJOR_CLASICO_PATH, "model.joblib"))
+    lexicons_clasico = joblib.load(os.path.join(MEJOR_CLASICO_PATH, "lexicon.pkl"))
+    print("Mejor modelo clásico cargado correctamente.")
+except Exception as e:
+    print(f"⚠️ Failed to load mejor modelo clásico: {e}")
+    vectorizer_clasico = None
+    clf_mejor = None
+    lexicons_clasico = None
 
 def lexico_features(text, lexicons):
     words = set(text.lower().split())
     return np.array([len(words & lexicons[name]) for name in lexicons]).reshape(1, -1)
 
 def predict_tfidf(text):
-    if vectorizer is None or clf_tfidf is None or lexicons is None:
+    if vectorizer_tfidf is None or clf_tfidf is None or lexicons_tfidf is None:
         return {"label": "unknown", "prob": 0.0}
-    X_tfidf = vectorizer.transform([text])
-    X_lexico = lexico_features(text, lexicons)
+    X_tfidf = vectorizer_tfidf.transform([text])
+    X_lexico = lexico_features(text, lexicons_tfidf)
     X = hstack([X_tfidf, X_lexico])
     proba = clf_tfidf.predict_proba(X)[0]
     label_idx = np.argmax(proba)
     label = "toxic" if label_idx == 1 else "clean"
     score = float(proba[label_idx])
+    return {"label": label, "prob": score}
+
+def predict_clasico(text):
+    if vectorizer_clasico is None or clf_mejor is None or lexicons_clasico is None:
+        return {"label": "unknown", "prob": 0.0}
+    X_tfidf = vectorizer_clasico.transform([text])
+    X_lexico = lexico_features(text, lexicons_clasico)
+    X = hstack([X_tfidf, X_lexico])
+    try:
+        proba = clf_mejor.predict_proba(X)[0]
+        label_idx = np.argmax(proba)
+        label = "toxic" if label_idx == 1 else "clean"
+        score = float(proba[label_idx])
+    except AttributeError:
+        # SVM/LinearSVC
+        score = clf_mejor.decision_function(X)[0]
+        label = "toxic" if score > 0 else "clean"
+        score = float(abs(score))
     return {"label": label, "prob": score}
 
 # --- Compile regex patterns ---
@@ -159,7 +184,7 @@ async def post_feedback(fb: Feedback):
 
 async def inference_worker():
     """
-    Consume messages from Redis, clasifica con regex + modelo + tfidf_lexico,
+    Consume messages from Redis, clasifica con regex + modelo + tfidf_lexico + mejor_clasico,
     almacena en MongoDB y emite a clientes WebSocket.
     Nunca muere por errores de formato o excepciones puntuales.
     """
@@ -176,7 +201,7 @@ async def inference_worker():
                 print(f"Skipping invalid JSON: {e} – raw: {raw}")
                 continue
 
-            # 3) Clasificación: LoRA/regex + modelo propio
+            # 3) Clasificación: LoRA/regex + ambos modelos clásicos
             label = None
             via = []
             prob = 0.0
@@ -200,8 +225,8 @@ async def inference_worker():
                 prob = toxic_prob
 
             prediction_lora = {"label": label, "prob": prob, "via": via}
-            # 3c) Modelo TF-IDF+léxico
             prediction_tfidf = predict_tfidf(doc["text"])
+            prediction_clasico = predict_clasico(doc["text"])
 
             # 4) Construye el documento Mongo
             document = {
@@ -210,7 +235,8 @@ async def inference_worker():
                 "text":      doc.get("text"),
                 "timestamp": doc.get("timestamp"),
                 "prediction_lora": prediction_lora,
-                "prediction_tfidf": prediction_tfidf
+                "prediction_tfidf": prediction_tfidf,
+                "prediction_clasico": prediction_clasico
             }
 
             # 5) Inserta y recupera el _id
@@ -223,4 +249,3 @@ async def inference_worker():
         except Exception as e:
             print(f"Error in inference_worker: {e}")
             await asyncio.sleep(1)
-
