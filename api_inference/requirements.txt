@@ -6,3 +6,7 @@ python-dotenv
 transformers
 peft
 torch
+scikit-learn
+scipy
+numpy
+joblib

@@ -40,6 +40,7 @@ services:
     networks: [moderation-net]
     volumes:
       - ./api_inference/adapters:/app/adapters
+      - ./models/tfidf_lexico:/app/models/tfidf_lexico
 
   model_trainer:
     build:

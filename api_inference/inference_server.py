@@ -1,5 +1,5 @@
 # inference_server.py
-# Purpose: Consume messages from Redis, classify with regex + PEFT model (if available), 
+# Purpose: Consume messages from Redis, classify with regex + PEFT model AND TF-IDF+Léxico,
 #          save in MongoDB, broadcast via WebSocket, and accept moderator feedback.
 
 import os
@@ -16,8 +16,13 @@ from redis.asyncio import Redis
 from motor.motor_asyncio import AsyncIOMotorClient
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from peft import PeftModel
-
+from fastapi.middleware.cors import CORSMiddleware
 from bson import ObjectId
+
+# --- Extra: Carga de modelo clásico TF-IDF+léxico ---
+import joblib
+import numpy as np
+from scipy.sparse import hstack
 
 # --- Load environment ---
 load_dotenv()
@@ -26,6 +31,7 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017")
 MONGO_DB  = os.getenv("MONGO_DB", "moderation") 
 MODEL_NAME = os.getenv("MODEL_NAME", "pysentimiento/robertuito-hate-speech")
 ADAPTER_PATH = os.getenv("ADAPTER_PATH", "./adapters/latest")
+TFIDF_PATH = "models/tfidf_lexico"
 
 # --- Initialize clients ---
 redis = Redis.from_url(REDIS_URL)
@@ -49,6 +55,34 @@ if os.path.isdir(ADAPTER_PATH) and os.path.exists(adapter_config):
 else:
     print("No PEFT adapter found, using base model.")
 
+# --- Load TF-IDF+Léxico model ---
+try:
+    vectorizer = joblib.load(os.path.join(TFIDF_PATH, "vectorizer.joblib"))
+    clf_tfidf = joblib.load(os.path.join(TFIDF_PATH, "model.joblib"))
+    lexicons = joblib.load(os.path.join(TFIDF_PATH, "lexicon.pkl"))
+    print("TF-IDF+léxico model loaded correctly.")
+except Exception as e:
+    print(f"⚠️ Failed to load TF-IDF+léxico model: {e}")
+    vectorizer = None
+    clf_tfidf = None
+    lexicons = None
+
+def lexico_features(text, lexicons):
+    words = set(text.lower().split())
+    return np.array([len(words & lexicons[name]) for name in lexicons]).reshape(1, -1)
+
+def predict_tfidf(text):
+    if vectorizer is None or clf_tfidf is None or lexicons is None:
+        return {"label": "unknown", "prob": 0.0}
+    X_tfidf = vectorizer.transform([text])
+    X_lexico = lexico_features(text, lexicons)
+    X = hstack([X_tfidf, X_lexico])
+    proba = clf_tfidf.predict_proba(X)[0]
+    label_idx = np.argmax(proba)
+    label = "toxic" if label_idx == 1 else "clean"
+    score = float(proba[label_idx])
+    return {"label": label, "prob": score}
+
 # --- Compile regex patterns ---
 regex_patterns = {
     "all_caps": re.compile(r'^[^a-z]*[A-ZÑÁÉÍÓÚ]{2,}[^a-z]*$'),
@@ -60,7 +94,8 @@ regex_patterns = {
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Puedes poner ["http://localhost:8080"] si solo usas ese origen
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -85,7 +120,6 @@ async def websocket_endpoint(ws: WebSocket):
         while True:
             await ws.receive_text()  # mantiene viva la conexión
     except WebSocketDisconnect:
-        # antes hacíamos clients.remove(ws) -> KeyError
         clients.discard(ws)
         print("WebSocket disconnected, removed client")
 
@@ -122,9 +156,10 @@ async def post_feedback(fb: Feedback):
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Message not found")
     return {"status": "ok", "updated": result.modified_count}
+
 async def inference_worker():
     """
-    Consume messages from Redis, clasifica con regex + modelo,
+    Consume messages from Redis, clasifica con regex + modelo + tfidf_lexico,
     almacena en MongoDB y emite a clientes WebSocket.
     Nunca muere por errores de formato o excepciones puntuales.
     """
@@ -141,7 +176,7 @@ async def inference_worker():
                 print(f"Skipping invalid JSON: {e} – raw: {raw}")
                 continue
 
-            # 3) Clasificación
+            # 3) Clasificación: LoRA/regex + modelo propio
             label = None
             via = []
             prob = 0.0
@@ -154,7 +189,7 @@ async def inference_worker():
                     prob = 1.0
                     break
 
-            # 3b) Si no, el modelo
+            # 3b) Si no, el modelo LoRA/base
             if label is None:
                 inputs = tokenizer(doc["text"], return_tensors="pt", truncation=True)
                 outputs = model(**inputs)
@@ -164,13 +199,18 @@ async def inference_worker():
                 via.append("model")
                 prob = toxic_prob
 
+            prediction_lora = {"label": label, "prob": prob, "via": via}
+            # 3c) Modelo TF-IDF+léxico
+            prediction_tfidf = predict_tfidf(doc["text"])
+
             # 4) Construye el documento Mongo
             document = {
-                "channel":   doc["channel"],
-                "user":      doc["user"],
-                "text":      doc["text"],
-                "timestamp": doc["timestamp"],
-                "prediction": {"label": label, "prob": prob, "via": via}
+                "channel":   doc.get("channel"),
+                "user":      doc.get("user"),
+                "text":      doc.get("text"),
+                "timestamp": doc.get("timestamp"),
+                "prediction_lora": prediction_lora,
+                "prediction_tfidf": prediction_tfidf
             }
 
             # 5) Inserta y recupera el _id
@@ -181,8 +221,6 @@ async def inference_worker():
             await broadcast(document)
 
         except Exception as e:
-            # Cualquier error deja el worker vivo
             print(f"Error in inference_worker: {e}")
             await asyncio.sleep(1)
-
 

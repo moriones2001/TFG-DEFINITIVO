@@ -1,4 +1,5 @@
 // script.js — List view sin “desplazamientos” al añadir mensajes
+
 const WS_URL = "ws://127.0.0.1:8000/ws";
 const socket = new WebSocket(WS_URL);
 
@@ -26,25 +27,43 @@ socket.addEventListener("message", e => {
 
 // Crea y añade un <li> al final de la lista (append), sin modificar selectedIndex
 function addMessageItem(msg) {
+  // DEBUG: Log del mensaje recibido
+  console.log("MSG RECIBIDO:", msg);
+
   const li = document.createElement("li");
   li.className = "message-item";
 
   // Avatar con fallback
   const img = document.createElement("img");
-  img.src = `https://static-cdn.jtvnw.net/jtv_user_pictures/${msg.user.toLowerCase()}-profile_image-70x70.png`;
+  img.src = `https://static-cdn.jtvnw.net/jtv_user_pictures/${msg.user?.toLowerCase() || "anon"}-profile_image-70x70.png`;
   img.onerror = () => { img.onerror = null; img.src = "default-avatar.png"; };
   li.appendChild(img);
 
   // Info
   const info = document.createElement("div");
   info.className = "info";
+  const lora = msg.prediction_lora || {};
+  const tfidf = msg.prediction_tfidf || {};
+
+  // Si no hay al menos una predicción, ignora el mensaje
+  if (!lora.label && !tfidf.label) {
+    console.warn("Mensaje recibido sin predicción válida, ignorado:", msg);
+    return;
+  }
+
   info.innerHTML = `
-    <div class="user">${msg.user}</div>
-    <div class="channel">${msg.channel}</div>
-    <div class="text">${msg.text}</div>
+    <div class="user">${msg.user || "?"}</div>
+    <div class="channel">${msg.channel || "?"}</div>
+    <div class="text">${msg.text || ""}</div>
     <div class="prediction">
-      <span class="label ${msg.prediction.label}">${msg.prediction.label}</span>
-      ${(msg.prediction.prob*100).toFixed(1)}%
+      <span class="label ${lora.label || "unknown"}">
+        [LoRA] ${lora.label !== undefined ? lora.label : "?"}
+        ${(lora.prob !== undefined ? (lora.prob*100).toFixed(1)+'%' : '')}
+      </span>
+      <span class="label ${tfidf.label || "unknown"}">
+        [TFIDF] ${tfidf.label !== undefined ? tfidf.label : "?"}
+        ${(tfidf.prob !== undefined ? (tfidf.prob*100).toFixed(1)+'%' : '')}
+      </span>
     </div>
   `;
   li.appendChild(info);
